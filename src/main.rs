@@ -8,33 +8,6 @@ use base64::prelude::*;
 
 mod httpparser;
 
-fn send_websocket_message(stream: &mut TcpStream, message: &str) {
-    let message_bytes = message.as_bytes();
-    let message_length = message_bytes.len();
-    let mut message_frame: Vec<u8> = Vec::new();
-    message_frame.push(0b10000001);
-    if message_length <= 125 {
-        message_frame.push(message_length as u8);
-    } else if message_length <= 65535 {
-        message_frame.push(126);
-        message_frame.push((message_length >> 8) as u8);
-        message_frame.push(message_length as u8);
-    } else {
-        message_frame.push(127);
-        message_frame.push((message_length >> 56) as u8);
-        message_frame.push((message_length >> 48) as u8);
-        message_frame.push((message_length >> 40) as u8);
-        message_frame.push((message_length >> 32) as u8);
-        message_frame.push((message_length >> 24) as u8);
-        message_frame.push((message_length >> 16) as u8);
-        message_frame.push((message_length >> 8) as u8);
-        message_frame.push(message_length as u8);
-    }
-    message_frame.extend_from_slice(message_bytes);
-    stream.write(&message_frame).unwrap();
-    println!("Sent: {}", message);
-}
-
 fn send_string_message(stream: &mut TcpStream, message: &str) {
     let message_bytes = message.as_bytes();
     let message_length = message_bytes.len();
@@ -63,19 +36,25 @@ fn send_string_message(stream: &mut TcpStream, message: &str) {
     //masking-key left blank at 4 bytes
     frame.extend_from_slice(message_bytes);
     for byte in &frame {
-        print!("{:#010b} ", byte);
+        //print!("{:#010b} ", byte);
     }
-    let bytes_written = stream.write(&frame).unwrap();
-    println!("{}", bytes_written);
+    let result = stream.write(&frame);
+    //print the error message if there is one
+    match result {
+        Err(e) => {
+            println!("Error writing to stream: {}", e);
+        }
+        Ok(bytes_written) => {
+            println!("Wrote {} bytes", bytes_written);
+        }
+        _ => {
+            println!("Unknown error");
+        
+        }
+    }
+    
+    //println!("{}", bytes_written);
 
-}
-fn handle_socket(stream: &mut TcpStream) {
-    // ...
-    let mut buffer: [u8; 1024] = [0; 1024];
-    let bytes_read = stream.read(&mut buffer).unwrap();
-    let first_float: [u8; 8] = buffer[0..8].try_into().unwrap();
-    println!("Received {} bytes", bytes_read);
-    println!("First 8 bytes: {:?}", f64::from_be_bytes(first_float));
 }
 fn calculate_response_key(websocket_key: &str) -> String {
     let globally_unique_identifier = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -87,9 +66,23 @@ fn calculate_response_key(websocket_key: &str) -> String {
 
     BASE64_STANDARD.encode(result)
 }
-fn handshake(stream: &mut TcpStream) -> Result<(), String> {
+fn read_string_stream(stream: &mut TcpStream) -> Result<String, String> {
     let mut buffer = [0; 1024];
-    let bytes_read = stream.read(&mut buffer).unwrap();
+    let result = stream.read(&mut buffer);
+    if result.is_err() {
+        return Err("Error reading stream".to_string());
+    }
+    let bytes_read = result.unwrap();
+    let string: &str = str::from_utf8(&buffer).unwrap();
+    Ok(string.to_string())
+}
+fn handshake(stream: &mut TcpStream) -> Result<(), String> {
+    let mut buffer = [0; 2048];
+    let read_result = stream.read(&mut buffer);
+    if read_result.is_err() {
+        return Err("Error reading streamm".to_string());
+    }
+    let bytes_read = read_result.unwrap();
     let string = str::from_utf8(&buffer).unwrap();
     let result_websocket_key = httpparser::get_header_value(string, "Sec-WebSocket-Key");
     if result_websocket_key.is_err() {
@@ -102,33 +95,35 @@ fn handshake(stream: &mut TcpStream) -> Result<(), String> {
     
     let response_key = calculate_response_key(&websocket_key);
 
-    //println!("Response key: {}", response_key);
+    println!("Response key: {}", response_key);
 
     let response = format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\nSec-WebSocket-Protocol: chat\r\n", response_key);
     let response_bytes = response.as_bytes();
-    stream.write(response_bytes).unwrap();
+    let result = stream.write(response_bytes);
+    if result.is_err() {
+        //probably should end the connection here and remove the stream from streams, probably add later
+        return Err("Error writing to stream".to_string());
+    }
+    let bytes_written = result.unwrap();
+    println!("Wrote {} bytes", bytes_written);
     Ok(())
 }
 
 fn main() {
-    let mut listener = TcpListener::bind("127.0.0.1:3000").expect("Cannot bind");
+    let listener = TcpListener::bind("127.0.0.1:3000").expect("Cannot bind");
     listener.set_nonblocking(true).expect("Cannot set non-blocking");
     //let test_key = "dGhlIHNhbXBsZSBub25jZQ==";
     //let response_key = calculate_response_key(test_key);
     //println!("{}", calculate_response_key("dGhlIHNhbXBsZSBub25jZQ=="));
     // accept connections and process them serially
-    let mut streams: Vec<&mut TcpStream> = Vec::new();
+    let mut streams: Vec<TcpStream> = Vec::new();
+    let mut waiting_handshakes: Vec<TcpStream> = Vec::new();
     loop {
         for stream_result in listener.incoming(){
             match stream_result {
-                Ok(mut new_stream) => {
-                    let result = handshake(&mut new_stream);
-                    if result.is_err() {
-                        println!("Error: {}", result.err().unwrap());
-                        continue;
-                    }
+                Ok(new_stream) => {
+                    waiting_handshakes.push(new_stream);
                     println!("New connection");
-                    streams.push(&mut new_stream);
                 }
                 Err(e) => {
                     if e.kind() != std::io::ErrorKind::WouldBlock {
@@ -138,17 +133,28 @@ fn main() {
                 }
             }
         }
-        for stream in &mut streams {
-            send_string_message(stream, "Hello from server!");
-            let mut buffer: [u8; 1024] = [0; 1024];
-            let bytes_read = stream.read(&mut buffer).unwrap();
-            println!("Received {} bytes", bytes_read);
-            //convert to string
-            let mut message = String::new();
-            for byte in buffer.iter() {
-                message.push(*byte as char);
+        for i in 0..waiting_handshakes.len() {
+            let result = handshake(&mut waiting_handshakes[i]);
+            if result.is_err() {
+                println!("Error: {}", result.err().unwrap());
+                continue;
             }
-            println!("Received: {}", message);
+            println!("Handshake complete");
+            let stream = waiting_handshakes.swap_remove(i);
+            streams.push(stream);
+        }
+        println!("--------New Tick---------");
+        for stream in &mut streams {
+            
+
+            send_string_message(stream, "Hello from server!");
+            let result = read_string_stream(stream);
+            if result.is_err() {
+                println!("Error: {}", result.err().unwrap());
+                continue;
+            }
+            let string = result.unwrap();
+            println!("Received: {}", string);
         }
         thread::sleep(Duration::from_secs(1));
     }
