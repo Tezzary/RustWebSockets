@@ -1,10 +1,10 @@
 use std::net::{TcpListener, TcpStream};
-use std::io::{Read, Write};
+use std::io::prelude::*;
 use std::str;
 use std::thread;
 use std::time::Duration;
 use sha1::{Sha1, Digest};
-use base64::prelude::*;
+use base64::{prelude::*, read};
 
 mod httpparser;
 
@@ -38,8 +38,9 @@ fn send_string_message(stream: &mut TcpStream, message: &str) {
     for byte in &frame {
         //print!("{:#010b} ", byte);
     }
-    let result = stream.write(&frame);
+    let result = stream.write_all(&frame).unwrap();
     //print the error message if there is one
+    /* 
     match result {
         Err(e) => {
             println!("Error writing to stream: {}", e);
@@ -52,6 +53,8 @@ fn send_string_message(stream: &mut TcpStream, message: &str) {
         
         }
     }
+    */
+    stream.flush().unwrap();
     
     //println!("{}", bytes_written);
 
@@ -97,65 +100,50 @@ fn handshake(stream: &mut TcpStream) -> Result<(), String> {
 
     println!("Response key: {}", response_key);
 
-    let response = format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\nSec-WebSocket-Protocol: chat\r\n", response_key);
+    let response = format!("HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: {}\nSec-WebSocket-Protocol: chat\n", response_key);
     let response_bytes = response.as_bytes();
-    let result = stream.write(response_bytes);
+    let result = stream.write_all(response_bytes);
     if result.is_err() {
         //probably should end the connection here and remove the stream from streams, probably add later
         return Err("Error writing to stream".to_string());
     }
-    let bytes_written = result.unwrap();
-    println!("Wrote {} bytes", bytes_written);
+    println!("Wrote {} bytes", response_bytes.len());
+    println!("flushing stream");
+    stream.flush().unwrap();
     Ok(())
 }
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:3000").expect("Cannot bind");
-    listener.set_nonblocking(true).expect("Cannot set non-blocking");
     //let test_key = "dGhlIHNhbXBsZSBub25jZQ==";
     //let response_key = calculate_response_key(test_key);
     //println!("{}", calculate_response_key("dGhlIHNhbXBsZSBub25jZQ=="));
     // accept connections and process them serially
-    let mut streams: Vec<TcpStream> = Vec::new();
-    let mut waiting_handshakes: Vec<TcpStream> = Vec::new();
-    loop {
-        for stream_result in listener.incoming(){
-            match stream_result {
-                Ok(new_stream) => {
-                    waiting_handshakes.push(new_stream);
-                    println!("New connection");
+    for stream_result in listener.incoming(){
+        match stream_result {
+            Ok(mut stream) => {
+                handshake(&mut stream).unwrap();
+                println!("Connection established");
+                thread::sleep(Duration::from_secs(3));
+                send_string_message(&mut stream, "Hello, World!");
+                println!("Sent message");
+                
+                let mut buffer = [0; 1024];
+                
+                /*
+                let read_result = stream.read(&mut buffer);
+                if read_result.is_err() {
+                    println!("Error reading stream");
                 }
-                Err(e) => {
-                    if e.kind() != std::io::ErrorKind::WouldBlock {
-                        println!("Error: {}", e);
-                    }
-                    break;
-                }
+                let bytes_read = read_result.unwrap();
+                //let text = 
+                let string = str::from_utf8(&buffer).unwrap();
+                println!("Received {} bytes", bytes_read);
+                */
+            }
+            Err(e) => {
+                println!("Error: {}", e);
             }
         }
-        for i in 0..waiting_handshakes.len() {
-            let result = handshake(&mut waiting_handshakes[i]);
-            if result.is_err() {
-                println!("Error: {}", result.err().unwrap());
-                continue;
-            }
-            println!("Handshake complete");
-            let stream = waiting_handshakes.swap_remove(i);
-            streams.push(stream);
-        }
-        println!("--------New Tick---------");
-        for stream in &mut streams {
-            
-
-            send_string_message(stream, "Hello from server!");
-            let result = read_string_stream(stream);
-            if result.is_err() {
-                println!("Error: {}", result.err().unwrap());
-                continue;
-            }
-            let string = result.unwrap();
-            println!("Received: {}", string);
-        }
-        thread::sleep(Duration::from_secs(1));
     }
 }

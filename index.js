@@ -1,15 +1,10 @@
-let socket = new WebSocket("ws://localhost:3000");
+let socket = new WebSocket("ws://127.0.0.1:3000");
 
-socket.addEventListener("message", (event) => {
-    console.log("Message from server ", event.data);
-  });
-function tick(){
-    try {
-        socket.send("Hello from client");
-        console.log("Message sent");
-    } catch (error) {
-        console.log("Error in sending message", error);
-    }
-    setTimeout(tick, 1000);
+socket.onopen = () => {
+    console.log("Connection established");
+    socket.send("Hello Server");
 }
-tick();
+
+socket.onmessage = (event) => {
+    console.log(event.data);
+}
