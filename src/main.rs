@@ -38,7 +38,7 @@ fn send_string_message(stream: &mut TcpStream, message: &str) {
     for byte in &frame {
         //print!("{:#010b} ", byte);
     }
-    let result = stream.write_all(&frame).unwrap();
+    stream.write_all(&frame).unwrap();
     //print the error message if there is one
     /* 
     match result {
@@ -109,7 +109,7 @@ fn handshake(stream: &mut TcpStream) -> Result<(), String> {
     }
     println!("Wrote {} bytes", response_bytes.len());
     println!("flushing stream");
-    stream.flush().unwrap();
+    (*stream).flush().unwrap();
     Ok(())
 }
 
@@ -122,10 +122,14 @@ fn main() {
     for stream_result in listener.incoming(){
         match stream_result {
             Ok(mut stream) => {
+                stream.set_nodelay(true).unwrap();
                 handshake(&mut stream).unwrap();
                 println!("Connection established");
                 thread::sleep(Duration::from_secs(3));
-                send_string_message(&mut stream, "Hello, World!");
+                for i in 0..1000 {
+                    send_string_message(&mut stream, &format!("Hello, World! {}", i));
+                }
+                //send_string_message(&mut stream, "Hello, World!");
                 println!("Sent message");
                 
                 let mut buffer = [0; 1024];
@@ -137,6 +141,7 @@ fn main() {
                 }
                 let bytes_read = read_result.unwrap();
                 //let text = 
+                println!("Received {} bytes", bytes_read);
                 let string = str::from_utf8(&buffer).unwrap();
                 println!("Received {} bytes", bytes_read);
                 */
