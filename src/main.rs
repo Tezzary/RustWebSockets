@@ -38,26 +38,23 @@ fn send_string_message(stream: &mut TcpStream, message: &str) -> Result<(), ()> 
     for byte in &frame {
         //print!("{:#010b} ", byte);
     }
-    stream.write_all(&frame).unwrap();
-    //print the error message if there is one
-    /* 
-    match result {
+    match stream.write_all(&frame) {
+        Ok(()) => {
+            match stream.flush() {
+                Ok(()) => {
+                    return Ok(())
+                }
+                Err(e) => {
+                    println!("Error flushing stream: {}", e);
+                    return Err(())
+                }
+            }
+        }
         Err(e) => {
             println!("Error writing to stream: {}", e);
-        }
-        Ok(bytes_written) => {
-            println!("Wrote {} bytes", bytes_written);
-        }
-        _ => {
-            println!("Unknown error");
-        
+            return Err(())
         }
     }
-    */
-    stream.flush().unwrap();
-    
-    //println!("{}", bytes_written);
-
 }
 fn calculate_response_key(websocket_key: &str) -> String {
     let globally_unique_identifier = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -124,7 +121,7 @@ fn main() {
         for stream_result in listener.incoming(){
             println!("Incoming connection");
             match stream_result {
-                Ok(mut stream) => {
+                Ok(stream) => {
                     //stream.set_nodelay(true).unwrap();
                     streams.push(stream);
                     println!("Connection established");
@@ -149,8 +146,17 @@ fn main() {
             }
             println!("{} streams remaining", streams.len());
         }
-        for websocket in &mut websockets {
-            send_string_message(websocket, "Hello, World!");
+        let websockets_len = websockets.len();
+        println!("{} websockets found", websockets_len);
+        for i in 0..websockets_len {
+            let mut websocket = &mut websockets[websockets_len-i-1];
+            if send_string_message(websocket, "Hello, World!").is_err() {
+                println!("Error sending message to websocket client removing websocket");
+                websockets.remove(websockets_len-i-1); //could look into optimisation with swap_remove
+            }
+            else {
+                println!("Message sent");
+            }
         }
         thread::sleep(Duration::from_secs(1));
     }
