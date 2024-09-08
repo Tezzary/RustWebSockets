@@ -8,7 +8,7 @@ use base64::{prelude::*, read};
 
 mod httpparser;
 
-fn send_string_message(stream: &mut TcpStream, message: &str) {
+fn send_string_message(stream: &mut TcpStream, message: &str) -> Result<(), ()> {
     let message_bytes = message.as_bytes();
     let message_length = message_bytes.len();
     let flags = 0b10000001;
@@ -100,55 +100,59 @@ fn handshake(stream: &mut TcpStream) -> Result<(), String> {
 
     println!("Response key: {}", response_key);
 
-    let response = format!("HTTP/1.1 101 Switching Protocols\nUpgrade: websocket\nConnection: Upgrade\nSec-WebSocket-Accept: {}\nSec-WebSocket-Protocol: chat\n", response_key);
+    let response = format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n", response_key);
+    println!("Response: {}", response);
     let response_bytes = response.as_bytes();
-    let result = stream.write_all(response_bytes);
-    if result.is_err() {
-        //probably should end the connection here and remove the stream from streams, probably add later
-        return Err("Error writing to stream".to_string());
-    }
-    println!("Wrote {} bytes", response_bytes.len());
+    let result = stream.write(response_bytes).unwrap();
+
+    //println!("Wrote {} bytes", response_bytes.len());
     println!("flushing stream");
-    (*stream).flush().unwrap();
+    stream.flush().unwrap();
     Ok(())
 }
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:3000").expect("Cannot bind");
+    listener.set_nonblocking(true).expect("Cannot set nonblocking");
     //let test_key = "dGhlIHNhbXBsZSBub25jZQ==";
     //let response_key = calculate_response_key(test_key);
     //println!("{}", calculate_response_key("dGhlIHNhbXBsZSBub25jZQ=="));
     // accept connections and process them serially
-    for stream_result in listener.incoming(){
-        match stream_result {
-            Ok(mut stream) => {
-                stream.set_nodelay(true).unwrap();
-                handshake(&mut stream).unwrap();
-                println!("Connection established");
-                thread::sleep(Duration::from_secs(3));
-                for i in 0..1000 {
-                    send_string_message(&mut stream, &format!("Hello, World! {}", i));
+    let mut websockets = Vec::new();
+    let mut streams = Vec::new();
+    'main_loop: loop {
+        for stream_result in listener.incoming(){
+            println!("Incoming connection");
+            match stream_result {
+                Ok(mut stream) => {
+                    //stream.set_nodelay(true).unwrap();
+                    streams.push(stream);
+                    println!("Connection established");
                 }
-                //send_string_message(&mut stream, "Hello, World!");
-                println!("Sent message");
-                
-                let mut buffer = [0; 1024];
-                
-                /*
-                let read_result = stream.read(&mut buffer);
-                if read_result.is_err() {
-                    println!("Error reading stream");
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    //println!("No connections to accept");
+                    break;
                 }
-                let bytes_read = read_result.unwrap();
-                //let text = 
-                println!("Received {} bytes", bytes_read);
-                let string = str::from_utf8(&buffer).unwrap();
-                println!("Received {} bytes", bytes_read);
-                */
-            }
-            Err(e) => {
-                println!("Error: {}", e);
+                Err(e) => {
+                    println!("Error: {}", e);
+                    break;
+                }
             }
         }
+        let streams_len = streams.len();
+        println!("{} streams found", streams_len);
+        for i in 0..streams_len {
+            if !handshake(&mut streams[streams_len-i-1]).is_err() {
+                println!("Handshake successful");
+                let stream = streams.remove(streams_len-i-1); //could look into optimisation with swap_remove
+                websockets.push(stream);
+            }
+            println!("{} streams remaining", streams.len());
+        }
+        for websocket in &mut websockets {
+            send_string_message(websocket, "Hello, World!");
+        }
+        thread::sleep(Duration::from_secs(1));
     }
+    
 }
