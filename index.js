@@ -2,7 +2,9 @@ let socket = new WebSocket("ws://127.0.0.1:3000");
 
 socket.onopen = () => {
     console.log("Connection established");
-    socket.send("Hello Server");
+    for (let i = 0; i < 10; i++) {
+        socket.send("Hello Server");
+    }
 }
 
 socket.onmessage = (event) => {
