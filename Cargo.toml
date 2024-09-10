@@ -1,5 +1,5 @@
 [package]
-name = "RustWebsocketServer"
+name = "rust_websocket"
 version = "0.1.0"
 edition = "2021"
 
