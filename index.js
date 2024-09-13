@@ -8,5 +8,5 @@ socket.onopen = () => {
 }
 
 socket.onmessage = (event) => {
-    console.log(event.data);
+    console.log(event.data); 
 }
