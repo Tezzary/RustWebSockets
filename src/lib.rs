@@ -138,6 +138,7 @@ fn accept_new_streams(listener: &TcpListener, streams: &mut Vec<TcpStream>) {
         match stream_result {
             Ok(stream) => {
                 //stream.set_nodelay(true).unwrap();
+                stream.set_nonblocking(true).unwrap();
                 streams.push(stream);
                 println!("Connection established");
             }
