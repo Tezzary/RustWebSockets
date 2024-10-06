@@ -174,7 +174,7 @@ pub struct WebSocket {
 }
 impl WebSocket {
     pub fn get_messages(&mut self) -> Vec<Frame> {
-        let mut buffer = [0; 1024];
+        let mut buffer = [0; 16384];
         let result = self.stream.read(&mut buffer);
         if result.is_err() {
             return Vec::new();
